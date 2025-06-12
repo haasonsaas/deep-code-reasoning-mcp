@@ -525,10 +525,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             affectedFiles: InputValidator.validateFilePaths(parsed.proposed_change.affected_files),
           };
 
+          // Convert snake_case to camelCase for TypeScript interface
+          const simulationParams = parsed.simulation_parameters ? {
+            stressConditions: parsed.simulation_parameters.stress_conditions,
+            targetEntryPoint: parsed.simulation_parameters.target_entry_point,
+          } : undefined;
+
           const result = await deepReasoner.simulateChange(
             context,
             proposedChange,
-            parsed.simulation_parameters,
+            simulationParams,
           );
 
           return {

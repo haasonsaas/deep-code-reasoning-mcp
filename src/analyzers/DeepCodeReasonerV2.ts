@@ -573,7 +573,7 @@ export class DeepCodeReasonerV2 {
       );
 
       // Clean up the session
-      this.conversationManager.removeSession(sessionId);
+      this.conversationManager.releaseLock(sessionId);
 
       return result;
     } catch (error) {
@@ -617,7 +617,7 @@ export class DeepCodeReasonerV2 {
 
       // Track the baseline analysis
       this.conversationManager.addTurn(sessionId, 'gemini', baselineResponse, {
-        step: 'baseline_analysis',
+        analysisType: 'what_if_simulation',
       });
 
       // Step 2: Apply the hypothetical change (analyze after state)
@@ -631,7 +631,7 @@ export class DeepCodeReasonerV2 {
 
       // Track the change analysis
       this.conversationManager.addTurn(sessionId, 'gemini', changeResponse, {
-        step: 'change_analysis',
+        analysisType: 'what_if_simulation',
       });
 
       // Step 3: Identify emergent behavior and system impact
@@ -645,7 +645,7 @@ export class DeepCodeReasonerV2 {
 
       // Track the impact analysis
       this.conversationManager.addTurn(sessionId, 'gemini', impactResponse, {
-        step: 'impact_analysis',
+        analysisType: 'what_if_simulation',
       });
 
       // Finalize the conversation and get structured results
