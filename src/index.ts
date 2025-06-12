@@ -72,6 +72,16 @@ const HypothesisTestSchema = z.object({
     entry_points: z.array(z.any()).optional(),
   }),
   test_approach: z.string(),
+  // New fields for What-If Scenario Simulator
+  proposed_change: z.object({
+    description: z.string().describe("A natural language description of the change's intent."),
+    diff: z.string().describe("A git-style diff of the proposed code changes."),
+    affected_files: z.array(z.string()).describe("The files affected by the diff."),
+  }).optional(),
+  simulation_parameters: z.object({
+    stress_conditions: z.array(z.enum(['high_concurrency', 'network_latency', 'high_error_rate'])).optional(),
+    target_entry_point: z.string().optional().describe("The entry point to start the simulation from, e.g., 'POST /api/orders'"),
+  }).optional(),
 });
 
 const CrossSystemImpactSchema = z.object({
@@ -215,7 +225,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'hypothesis_test',
-        description: 'Use Gemini to test specific theories about code behavior',
+        description: 'Use Gemini to test specific theories about code behavior or simulate "What-If" scenarios for proposed changes',
         inputSchema: {
           type: 'object',
           properties: {
@@ -229,6 +239,28 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               required: ['files'],
             },
             test_approach: { type: 'string' },
+            proposed_change: {
+              type: 'object',
+              description: 'Optional: Simulate the impact of a proposed code change',
+              properties: {
+                description: { type: 'string', description: "Natural language description of the change's intent" },
+                diff: { type: 'string', description: 'Git-style diff of the proposed changes' },
+                affected_files: { type: 'array', items: { type: 'string' }, description: 'Files affected by the diff' },
+              },
+              required: ['description', 'diff', 'affected_files'],
+            },
+            simulation_parameters: {
+              type: 'object',
+              description: 'Optional: Parameters for What-If simulation',
+              properties: {
+                stress_conditions: { 
+                  type: 'array', 
+                  items: { type: 'string', enum: ['high_concurrency', 'network_latency', 'high_error_rate'] },
+                  description: 'Stress conditions to simulate'
+                },
+                target_entry_point: { type: 'string', description: 'Entry point to start simulation (e.g., "POST /api/orders")' },
+              },
+            },
           },
           required: ['hypothesis', 'code_scope', 'test_approach'],
         },
