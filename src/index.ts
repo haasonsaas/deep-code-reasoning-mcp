@@ -13,6 +13,7 @@ import * as dotenv from 'dotenv';
 import { DeepCodeReasonerV2 } from './analyzers/DeepCodeReasonerV2.js';
 import type { ClaudeCodeContext, CodeScope } from './models/types.js';
 import { ErrorClassifier } from './utils/ErrorClassifier.js';
+import { InputValidator } from './utils/InputValidator.js';
 
 // Load environment variables
 dotenv.config();
@@ -405,11 +406,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (name) {
       case 'escalate_analysis': {
         const parsed = EscalateAnalysisSchema.parse(args);
+        
+        // Validate and sanitize the Claude context
+        const validatedContext = InputValidator.validateClaudeContext(parsed.claude_context);
+        
+        // Override with specific values from the parsed input
         const context: ClaudeCodeContext = {
-          attemptedApproaches: parsed.claude_context.attempted_approaches,
-          partialFindings: parsed.claude_context.partial_findings,
-          stuckPoints: [parsed.claude_context.stuck_description],
-          focusArea: parsed.claude_context.code_scope as CodeScope,
+          ...validatedContext,
           analysisBudgetRemaining: parsed.time_budget_seconds,
         };
 
@@ -431,8 +434,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'trace_execution_path': {
         const parsed = TraceExecutionPathSchema.parse(args);
+        
+        // Validate the entry point file path
+        const validatedPath = InputValidator.validateFilePaths([parsed.entry_point.file])[0];
+        if (!validatedPath) {
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            'Invalid entry point file path',
+          );
+        }
+        
         const result = await deepReasoner.traceExecutionPath(
-          parsed.entry_point,
+          { ...parsed.entry_point, file: validatedPath },
           parsed.max_depth,
           parsed.include_data_flow,
         );
@@ -449,10 +462,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'hypothesis_test': {
         const parsed = HypothesisTestSchema.parse(args);
+        
+        // Validate file paths
+        const validatedFiles = InputValidator.validateFilePaths(parsed.code_scope.files);
+        if (validatedFiles.length === 0) {
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            'No valid file paths provided',
+          );
+        }
+        
         const result = await deepReasoner.testHypothesis(
-          parsed.hypothesis,
-          parsed.code_scope.files,
-          parsed.test_approach,
+          InputValidator.validateString(parsed.hypothesis, 2000),
+          validatedFiles,
+          InputValidator.validateString(parsed.test_approach, 1000),
         );
 
         return {
@@ -467,8 +490,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'cross_system_impact': {
         const parsed = CrossSystemImpactSchema.parse(args);
+        
+        // Validate file paths
+        const validatedFiles = InputValidator.validateFilePaths(parsed.change_scope.files);
+        if (validatedFiles.length === 0) {
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            'No valid file paths provided',
+          );
+        }
+        
         const result = await deepReasoner.analyzeCrossSystemImpact(
-          parsed.change_scope.files,
+          validatedFiles,
           parsed.impact_types,
         );
 
@@ -484,10 +517,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'performance_bottleneck': {
         const parsed = PerformanceBottleneckSchema.parse(args);
+        
+        // Validate the entry point file path
+        const validatedPath = InputValidator.validateFilePaths([parsed.code_path.entry_point.file])[0];
+        if (!validatedPath) {
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            'Invalid entry point file path',
+          );
+        }
+        
         const result = await deepReasoner.analyzePerformance(
-          parsed.code_path.entry_point,
+          { ...parsed.code_path.entry_point, file: validatedPath },
           parsed.profile_depth,
-          parsed.code_path.suspected_issues,
+          parsed.code_path.suspected_issues ? 
+            InputValidator.validateStringArray(parsed.code_path.suspected_issues) : 
+            undefined,
         );
 
         return {
@@ -502,11 +547,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'start_conversation': {
         const parsed = StartConversationSchema.parse(args);
+        
+        // Validate and sanitize the Claude context
+        const validatedContext = InputValidator.validateClaudeContext(parsed.claude_context);
+        
+        // Override default budget
         const context: ClaudeCodeContext = {
-          attemptedApproaches: parsed.claude_context.attempted_approaches,
-          partialFindings: parsed.claude_context.partial_findings,
-          stuckPoints: [parsed.claude_context.stuck_description],
-          focusArea: parsed.claude_context.code_scope as CodeScope,
+          ...validatedContext,
           analysisBudgetRemaining: 60,
         };
 

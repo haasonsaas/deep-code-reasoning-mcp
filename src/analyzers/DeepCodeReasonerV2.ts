@@ -6,7 +6,7 @@ import type {
 import { GeminiService } from '../services/GeminiService.js';
 import { ConversationalGeminiService } from '../services/ConversationalGeminiService.js';
 import { ConversationManager } from '../services/ConversationManager.js';
-import { CodeReader } from '../utils/CodeReader.js';
+import { SecureCodeReader } from '../utils/SecureCodeReader.js';
 import { ErrorClassifier } from '../utils/ErrorClassifier.js';
 import { ConversationLockedError, SessionNotFoundError } from '../errors/index.js';
 
@@ -14,13 +14,13 @@ export class DeepCodeReasonerV2 {
   private geminiService: GeminiService;
   private conversationalGemini: ConversationalGeminiService;
   private conversationManager: ConversationManager;
-  private codeReader: CodeReader;
+  private codeReader: SecureCodeReader;
 
   constructor(geminiApiKey: string) {
     this.geminiService = new GeminiService(geminiApiKey);
     this.conversationalGemini = new ConversationalGeminiService(geminiApiKey);
     this.conversationManager = new ConversationManager();
-    this.codeReader = new CodeReader();
+    this.codeReader = new SecureCodeReader();
   }
 
   async escalateFromClaudeCode(
