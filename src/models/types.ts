@@ -148,3 +148,45 @@ export interface Insight {
   description: string;
   supporting_evidence: string[];
 }
+
+// What-If Scenario Simulator types
+export interface ProposedChange {
+  description: string;
+  diff: string;
+  affectedFiles: string[];
+}
+
+export interface SimulationParameters {
+  stressConditions?: Array<'high_concurrency' | 'network_latency' | 'high_error_rate'>;
+  targetEntryPoint?: string;
+}
+
+export interface SimulationFinding {
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  findingType: 'performance_degradation' | 'new_bug' | 'breaking_change' | 'emergent_instability';
+  description: string;
+  evidence: {
+    before: string;
+    after: string;
+  };
+  location: CodeLocation;
+}
+
+export interface SimulationResult {
+  summary: {
+    recommendation: 'safe_to_implement' | 'proceed_with_caution' | 'high_risk_do_not_implement';
+    justification: string;
+  };
+  findings: SimulationFinding[];
+  impactComparison?: {
+    before: {
+      executionPath?: ExecutionPath;
+      performance?: PerformanceIssue[];
+    };
+    after: {
+      executionPath?: ExecutionPath;
+      performance?: PerformanceIssue[];
+    };
+  };
+  systemImpact?: SystemImpact;
+}
