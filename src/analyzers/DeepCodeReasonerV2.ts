@@ -2,6 +2,9 @@ import type {
   ClaudeCodeContext,
   DeepAnalysisResult,
   CodeLocation,
+  SimulationResult,
+  ProposedChange,
+  SimulationParameters,
 } from '../models/types.js';
 import { GeminiService } from '../services/GeminiService.js';
 import { ConversationalGeminiService } from '../services/ConversationalGeminiService.js';
@@ -529,6 +532,83 @@ export class DeepCodeReasonerV2 {
       lastActivity: session.lastActivity,
       progress: session.analysisProgress.confidenceLevel,
       canFinalize,
+    };
+  }
+
+  /**
+   * Simulate the impact of a proposed code change using What-If analysis
+   */
+  async simulateChange(
+    context: ClaudeCodeContext,
+    proposedChange: ProposedChange,
+    simulationParameters?: SimulationParameters,
+  ): Promise<SimulationResult> {
+    try {
+      // Create a conversational session for the multi-step analysis
+      const sessionId = this.conversationManager.createSession(context);
+
+      // Read all relevant code files
+      const codeFiles = await this.codeReader.readCodeFiles(context.focusArea);
+
+      // Also read the files affected by the proposed change
+      for (const file of proposedChange.affectedFiles) {
+        if (!codeFiles.has(file)) {
+          try {
+            const content = await this.codeReader.readFile(file);
+            codeFiles.set(file, content);
+          } catch (error) {
+            console.warn(`Could not read affected file ${file}:`, error);
+          }
+        }
+      }
+
+      // Start the three-step comparative simulation
+      const result = await this.performComparativeSimulation(
+        sessionId,
+        context,
+        proposedChange,
+        codeFiles,
+        simulationParameters,
+      );
+
+      // Clean up the session
+      this.conversationManager.removeSession(sessionId);
+
+      return result;
+    } catch (error) {
+      console.error('Error in simulateChange:', error);
+      
+      // Return a high-risk result on error
+      return {
+        summary: {
+          recommendation: 'high_risk_do_not_implement',
+          justification: `Failed to simulate change: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        },
+        findings: [],
+      };
+    }
+  }
+
+  /**
+   * Perform the three-step comparative simulation using conversational AI
+   */
+  private async performComparativeSimulation(
+    sessionId: string,
+    context: ClaudeCodeContext,
+    proposedChange: ProposedChange,
+    codeFiles: Map<string, string>,
+    parameters?: SimulationParameters,
+  ): Promise<SimulationResult> {
+    // This is a placeholder - we'll implement the full three-step chain
+    // in the next commit after setting up the conversational prompts
+    
+    // For now, return a basic result
+    return {
+      summary: {
+        recommendation: 'proceed_with_caution',
+        justification: 'Simulation not yet fully implemented',
+      },
+      findings: [],
     };
   }
 }
