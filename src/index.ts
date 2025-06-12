@@ -11,7 +11,7 @@ import { z } from 'zod';
 import * as dotenv from 'dotenv';
 
 import { DeepCodeReasonerV2 } from './analyzers/DeepCodeReasonerV2.js';
-import type { ClaudeCodeContext } from './models/types.js';
+import type { ClaudeCodeContext, ProposedChange } from './models/types.js';
 import { ErrorClassifier } from './utils/ErrorClassifier.js';
 import { InputValidator } from './utils/InputValidator.js';
 
@@ -504,6 +504,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
+        // Check if this is a What-If scenario simulation
+        if (parsed.proposed_change) {
+          // Create a ClaudeCodeContext for the simulation
+          const context: ClaudeCodeContext = {
+            attemptedApproaches: [],
+            partialFindings: [],
+            stuckPoints: [parsed.hypothesis],
+            focusArea: {
+              files: validatedFiles,
+              entryPoints: parsed.code_scope.entry_points || [],
+            },
+            analysisBudgetRemaining: 120, // 2 minutes for simulation
+          };
+
+          // Validate the proposed change fields
+          const proposedChange: ProposedChange = {
+            description: InputValidator.validateString(parsed.proposed_change.description, 1000),
+            diff: InputValidator.validateString(parsed.proposed_change.diff, 10000),
+            affectedFiles: InputValidator.validateFilePaths(parsed.proposed_change.affected_files),
+          };
+
+          const result = await deepReasoner.simulateChange(
+            context,
+            proposedChange,
+            parsed.simulation_parameters,
+          );
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        }
+
+        // Regular hypothesis test
         const result = await deepReasoner.testHypothesis(
           InputValidator.validateString(parsed.hypothesis, 2000),
           validatedFiles,
