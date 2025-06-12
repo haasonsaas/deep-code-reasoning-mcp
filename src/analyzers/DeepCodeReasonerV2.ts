@@ -3,6 +3,7 @@ import type {
   DeepAnalysisResult,
   CodeLocation,
   SimulationResult,
+  SimulationFinding,
   ProposedChange,
   SimulationParameters,
 } from '../models/types.js';
@@ -599,16 +600,237 @@ export class DeepCodeReasonerV2 {
     codeFiles: Map<string, string>,
     parameters?: SimulationParameters,
   ): Promise<SimulationResult> {
-    // This is a placeholder - we'll implement the full three-step chain
-    // in the next commit after setting up the conversational prompts
+    try {
+      // Step 1: Establish the baseline (analyze current state)
+      const baselinePrompt = this.buildBaselineAnalysisPrompt(
+        proposedChange,
+        parameters?.stressConditions,
+      );
+
+      const { response: baselineResponse } = await this.conversationalGemini.startConversation(
+        sessionId,
+        context,
+        'what_if_simulation',
+        codeFiles,
+        baselinePrompt,
+      );
+
+      // Track the baseline analysis
+      this.conversationManager.addTurn(sessionId, 'gemini', baselineResponse, {
+        step: 'baseline_analysis',
+      });
+
+      // Step 2: Apply the hypothetical change (analyze after state)
+      const changePrompt = this.buildChangeAnalysisPrompt(proposedChange, parameters?.stressConditions);
+      
+      const { response: changeResponse, analysisProgress } = await this.conversationalGemini.continueConversation(
+        sessionId,
+        changePrompt,
+        true, // Include code snippets
+      );
+
+      // Track the change analysis
+      this.conversationManager.addTurn(sessionId, 'gemini', changeResponse, {
+        step: 'change_analysis',
+      });
+
+      // Step 3: Identify emergent behavior and system impact
+      const impactPrompt = this.buildImpactAnalysisPrompt(parameters?.stressConditions);
+
+      const { response: impactResponse } = await this.conversationalGemini.continueConversation(
+        sessionId,
+        impactPrompt,
+        false,
+      );
+
+      // Track the impact analysis
+      this.conversationManager.addTurn(sessionId, 'gemini', impactResponse, {
+        step: 'impact_analysis',
+      });
+
+      // Finalize the conversation and get structured results
+      const finalResult = await this.conversationalGemini.finalizeConversation(
+        sessionId,
+        'actionable',
+      );
+
+      // Convert the DeepAnalysisResult to SimulationResult
+      return this.convertToSimulationResult(finalResult, proposedChange);
+    } catch (error) {
+      console.error('Error in performComparativeSimulation:', error);
+      throw error;
+    }
+  }
+
+  private buildBaselineAnalysisPrompt(
+    proposedChange: ProposedChange,
+    stressConditions?: Array<'high_concurrency' | 'network_latency' | 'high_error_rate'>,
+  ): string {
+    const affectedFunctions = this.extractFunctionsFromDiff(proposedChange.diff);
     
-    // For now, return a basic result
+    let prompt = `I need you to analyze the current state of the code, specifically focusing on these areas:
+
+Files affected: ${proposedChange.affectedFiles.join(', ')}
+${affectedFunctions.length > 0 ? `Functions that will be modified: ${affectedFunctions.join(', ')}` : ''}
+
+Please analyze:
+1. The current execution path of the affected code
+2. Current performance characteristics
+3. How the code behaves under normal conditions
+4. Any existing error handling or retry mechanisms`;
+
+    if (stressConditions && stressConditions.length > 0) {
+      prompt += `\n5. IMPORTANT: Pay special attention to behavior under these stress conditions: ${stressConditions.join(', ')}`;
+    }
+
+    prompt += `\n\nDescribe the current state in detail, as we'll be comparing it to a modified version.`;
+
+    return prompt;
+  }
+
+  private buildChangeAnalysisPrompt(
+    proposedChange: ProposedChange,
+    stressConditions?: Array<'high_concurrency' | 'network_latency' | 'high_error_rate'>,
+  ): string {
+    let prompt = `Now, consider the following proposed change:
+
+${proposedChange.description}
+
+Here's the actual diff:
+\`\`\`diff
+${proposedChange.diff}
+\`\`\`
+
+Re-evaluate your previous analysis with this change applied:
+1. How does this change alter the execution path?
+2. What are the new performance characteristics?
+3. Does it introduce any new edge cases or failure modes?
+4. Are there any changes to error handling or retry behavior?`;
+
+    if (stressConditions && stressConditions.length > 0) {
+      prompt += `\n5. CRITICAL: How does this change affect behavior under the stress conditions (${stressConditions.join(', ')})?`;
+      prompt += `\n6. Could this change create feedback loops or cascading failures under stress?`;
+    }
+
+    prompt += `\n\nHighlight the DIFFERENCES between the original code and this modified version.`;
+
+    return prompt;
+  }
+
+  private buildImpactAnalysisPrompt(
+    stressConditions?: Array<'high_concurrency' | 'network_latency' | 'high_error_rate'>,
+  ): string {
+    let prompt = `Based on the differences you identified between the original and modified code, perform a system-level impact analysis:
+
+1. **Emergent Behaviors**: Are there any feedback loops (positive or negative) that could emerge from this change?
+2. **Resource Impact**: Could this change lead to resource exhaustion (CPU, memory, connections, etc.)?
+3. **Downstream Effects**: How might this change affect other services or components that depend on this code?
+4. **Risk Assessment**: What is the overall risk level of implementing this change?`;
+
+    if (stressConditions && stressConditions.length > 0) {
+      prompt += `\n5. **Stress Scenarios**: Under the specified stress conditions (${stressConditions.join(', ')}), what's the worst-case scenario?`;
+    }
+
+    prompt += `\n\nConclude with:
+- A clear recommendation: 'safe_to_implement', 'proceed_with_caution', or 'high_risk_do_not_implement'
+- Specific evidence from your analysis to justify this recommendation
+- Any conditions or safeguards that should be in place before implementing this change`;
+
+    return prompt;
+  }
+
+  private extractFunctionsFromDiff(diff: string): string[] {
+    const functions: string[] = [];
+    const functionPattern = /@@.*@@\s*(?:function\s+)?(\w+)\s*\(/g;
+    let match;
+
+    while ((match = functionPattern.exec(diff)) !== null) {
+      if (match[1]) {
+        functions.push(match[1]);
+      }
+    }
+
+    // Also try to extract from method definitions
+    const methodPattern = /[-+]\s*(?:async\s+)?(\w+)\s*\([^)]*\)\s*[:{]/g;
+    while ((match = methodPattern.exec(diff)) !== null) {
+      if (match[1] && !functions.includes(match[1])) {
+        functions.push(match[1]);
+      }
+    }
+
+    return functions;
+  }
+
+  private convertToSimulationResult(
+    analysisResult: DeepAnalysisResult,
+    proposedChange: ProposedChange,
+  ): SimulationResult {
+    // Extract recommendation from the analysis
+    let recommendation: SimulationResult['summary']['recommendation'] = 'proceed_with_caution';
+    let justification = 'Analysis completed';
+
+    // Look for recommendation in the immediate actions
+    const recommendationAction = analysisResult.recommendations.immediateActions.find(
+      action => action.description.toLowerCase().includes('recommend') ||
+                action.description.toLowerCase().includes('safe') ||
+                action.description.toLowerCase().includes('risk'),
+    );
+
+    if (recommendationAction) {
+      if (recommendationAction.description.toLowerCase().includes('high risk') ||
+          recommendationAction.description.toLowerCase().includes('do not')) {
+        recommendation = 'high_risk_do_not_implement';
+      } else if (recommendationAction.description.toLowerCase().includes('safe')) {
+        recommendation = 'safe_to_implement';
+      }
+      justification = recommendationAction.description;
+    }
+
+    // Convert findings to simulation findings
+    const simulationFindings: SimulationFinding[] = analysisResult.findings.rootCauses.map(cause => ({
+      riskLevel: this.mapConfidenceToRiskLevel(cause.confidence),
+      findingType: this.mapCauseTypeToFindingType(cause.type),
+      description: cause.description,
+      evidence: {
+        before: 'Original behavior', // These would be extracted from the conversation
+        after: cause.description,
+      },
+      location: cause.evidence[0] || { file: proposedChange.affectedFiles[0] || 'unknown', line: 0 },
+    }));
+
     return {
       summary: {
-        recommendation: 'proceed_with_caution',
-        justification: 'Simulation not yet fully implemented',
+        recommendation,
+        justification,
       },
-      findings: [],
+      findings: simulationFindings,
+      systemImpact: analysisResult.findings.crossSystemImpacts[0],
+      impactComparison: {
+        before: {
+          executionPath: analysisResult.findings.executionPaths[0],
+          performance: [],
+        },
+        after: {
+          executionPath: analysisResult.findings.executionPaths[1],
+          performance: analysisResult.findings.performanceBottlenecks,
+        },
+      },
     };
+  }
+
+  private mapConfidenceToRiskLevel(confidence: number): SimulationResult['findings'][0]['riskLevel'] {
+    if (confidence >= 0.8) return 'critical';
+    if (confidence >= 0.6) return 'high';
+    if (confidence >= 0.4) return 'medium';
+    return 'low';
+  }
+
+  private mapCauseTypeToFindingType(
+    causeType: string,
+  ): SimulationResult['findings'][0]['findingType'] {
+    if (causeType.includes('performance')) return 'performance_degradation';
+    if (causeType.includes('bug') || causeType.includes('error')) return 'new_bug';
+    if (causeType.includes('breaking') || causeType.includes('api')) return 'breaking_change';
+    return 'emergent_instability';
   }
 }
