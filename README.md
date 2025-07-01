@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/haasonsaas-deep-code-reasoning-mcp-badge.png)](https://mseep.ai/app/haasonsaas-deep-code-reasoning-mcp)
+
 # Deep Code Reasoning MCP Server
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
